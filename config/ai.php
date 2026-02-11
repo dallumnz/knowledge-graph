@@ -100,4 +100,30 @@ return [
         'cache_ttl' => (int) env('AI_VECTOR_CACHE_TTL', 600), // 10 minutes
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Document Storage Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for document storage and source attribution.
+    |
+    | Source Types:
+    | - file: Uploaded files (PDF, DOC, TXT, etc.)
+    | - url: Web pages or external URLs
+    | - text: Raw text input
+    | - api: External API sources
+    |
+    | Chunking:
+    | - default_chunk_size: Default size for text chunks (in characters)
+    | - max_chunk_size: Maximum allowed chunk size
+    |
+    */
+
+    'documents' => [
+        'default_chunk_size' => (int) env('AI_DOCUMENT_CHUNK_SIZE', 500),
+        'max_chunk_size' => (int) env('AI_DOCUMENT_MAX_CHUNK_SIZE', 10000),
+        'store_full_content' => env('AI_DOCUMENT_STORE_FULL', true),
+        'source_types' => ['file', 'url', 'text', 'api'],
+    ],
+
 ];

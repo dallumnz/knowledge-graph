@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Repositories\NodeRepository;
+use App\Services\DocumentService;
 use App\Services\EmbeddingService;
 use App\Services\VectorStore;
 use Illuminate\Http\JsonResponse;
@@ -16,6 +17,7 @@ class SearchController extends Controller
         private NodeRepository $nodeRepository,
         private EmbeddingService $embeddingService,
         private VectorStore $vectorStore,
+        private DocumentService $documentService,
     ) {}
 
     /**
@@ -53,14 +55,47 @@ class SearchController extends Controller
         // Search for similar vectors
         $results = $this->vectorStore->searchSimilar($queryVector, $limit, $minSimilarity);
 
-        // Format results
-        $formattedResults = array_map(function ($result) {
+        // Collect document IDs for eager loading
+        $documentIds = [];
+        foreach ($results as $result) {
+            if ($result['node']->document_id !== null) {
+                $documentIds[] = $result['node']->document_id;
+            }
+        }
+
+        // Eager load documents
+        $documents = [];
+        if (! empty($documentIds)) {
+            $documents = $this->documentService->getAll(['ids' => array_unique($documentIds)])
+                ->keyBy('id')
+                ->all();
+        }
+
+        // Format results with document attribution
+        $formattedResults = array_map(function ($result) use ($documents) {
+            $node = $result['node'];
+            $document = null;
+
+            if ($node->document_id !== null && isset($documents[$node->document_id])) {
+                $doc = $documents[$node->document_id];
+                $document = [
+                    'id' => $doc->id,
+                    'title' => $doc->title,
+                    'source_type' => $doc->source_type,
+                    'source_path' => $doc->source_path,
+                ];
+            }
+
             return [
-                'id' => $result['node']->id,
-                'type' => $result['node']->type,
-                'content' => $result['node']->content,
+                'node' => [
+                    'id' => $node->id,
+                    'type' => $node->type,
+                    'content' => $node->content,
+                    'document_id' => $node->document_id,
+                    'created_at' => $node->created_at->toIso8601String(),
+                ],
                 'score' => round($result['score'], 4),
-                'created_at' => $result['node']->created_at->toIso8601String(),
+                'document' => $document,
             ];
         }, $results);
 

@@ -218,3 +218,168 @@ resources/views/
 - Built landing page with API examples
 - Created dashboard with search, ingest, and stats
 - 181 tests passing
+
+---
+
+# RAG Pipeline Enhancement – Knowledge Graph
+
+## 1. Architecture Diagram
+
+```
+┌───────────────────────┐          ┌───────────────────────┐
+│   Document Ingest API │◀────────►│      Client Upload    │
+│ (POST /api/ingest)    │          └───────────────────────┘
+└─────────────▲─────────┘
+              │
+              │ 1. Metadata Service
+              ▼
+        ┌───────────────────────┐
+        │   MetadataService     │
+        │ (summary, keywords)   │
+        └─────────────▲─────────┘
+                      │
+                      │ 2. Chunking Service
+                      ▼
+                ┌───────────────────────┐
+                │   DocumentChunker     │
+                │ (smart boundaries)    │
+                └─────────────▲─────────┘
+                              │
+                              │ 3. Structure Analyzer
+                              ▼
+                        ┌───────────────────────┐
+                        │   DocumentParser     │
+                        │ (headings, tables, etc.)│
+                        └─────────────▲─────────┘
+                                      │
+                                      │ 4. KeywordExtractor
+                                      ▼
+                                ┌───────────────────────┐
+                                │   KeywordExtractor    │
+                                │ (TF‑IDF / embeddings)│
+                                └─────────────▲─────────┘
+                                              │
+                                              │ Vector Store
+                                              ▼
+                                    ┌───────────────────────┐
+                                    │  PostgreSQL pgvector  │
+                                    │  + new tables/cols    │
+                                    └─────────────▲─────────┘
+                                              │
+                                              │ Search API (GET /api/search)
+                                              ▼
+                                      ┌───────────────────────┐
+                                      │   SearchController   │
+                                      │  (uses metadata,      │
+                                      │   weights, filters)   │
+                                      └───────────────────────┘
+```
+
+*All services are stateless and communicate via method calls or queued jobs.  
+Valkey is used to cache embeddings per chunk for rapid retrieval.*
+
+---
+
+## 2. Class Structure
+
+| Service | Responsibility | Key Methods | Interfaces |
+|---------|----------------|-------------|------------|
+| **MetadataService** | Generates short summary & keyword list per chunk | `generateSummary(string $text): string`<br>`extractKeywords(string $text, int $count = 5): array` | `app/Services/Metadata/IMetadataService.php` |
+| **DocumentChunker** | Splits raw document respecting headings, lists, tables | `chunkText(string $content, int $size, int $overlap): array` | `app/Services/Chunking/IDocumentChunker.php` |
+| **DocumentParser** | Parses Markdown/HTML into structural tree (headings depth, tables, code blocks) | `parse(string $content): DocumentStructure` | `app/Services/Parsing/IDocumentParser.php` |
+| **KeywordExtractor** | Computes weighted keywords using TF‑IDF or embedding similarity | `extractWeighted(array $chunks): array`<br>`weightKeywords(array $keywords): array` | `app/Services/Keyword/IKeywordExtractor.php` |
+| **EmbeddingService** (existing) | Generates and caches embeddings via Valkey, stores in pgvector | – | – |
+
+All services implement their interface to enable unit testing and future swapping of implementations.
+
+---
+
+## 3. Database Schema Changes
+
+```sql
+-- Table: document_chunks
+CREATE TABLE IF NOT EXISTS document_chunks (
+    id BIGSERIAL PRIMARY KEY,
+    document_id BIGINT REFERENCES documents(id) ON DELETE CASCADE,
+    chunk_index INT NOT NULL,
+    content TEXT NOT NULL,
+    embedding VECTOR(768),
+    metadata JSONB DEFAULT '{}'::jsonb,
+    structure JSONB,           -- hierarchical info from DocumentParser
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Index for fast vector similarity search
+CREATE INDEX IF NOT EXISTS idx_document_chunks_embedding ON document_chunks USING ivfflat (embedding) WITH (lists = 1000);
+
+-- Table: chunk_keywords
+CREATE TABLE IF NOT EXISTS chunk_keywords (
+    id BIGSERIAL PRIMARY KEY,
+    chunk_id BIGINT REFERENCES document_chunks(id) ON DELETE CASCADE,
+    keyword TEXT NOT NULL,
+    weight FLOAT NOT NULL
+);
+CREATE INDEX idx_chunk_keywords_keyword ON chunk_keywords(keyword);
+```
+
+*`metadata` holds `{summary: string, keywords: array<string>}`.  
+`structure` contains `{depth:int, type:string, title:string, ...}`.*
+
+---
+
+## 4. API Changes
+
+| Endpoint | Method | New Parameters | Backward Compatibility |
+|----------|--------|-----------------|------------------------|
+| `/api/ingest` | POST | `chunk_size?int`, `overlap?int`, `extract_metadata?bool`, `parse_structure?bool` | All new params are optional; existing behavior unchanged. |
+| `/api/search` | GET | `keywords?string[]`, `weights?bool`, `structure_filter?json` | Existing query params remain functional. |
+
+*If a breaking change is required, version the endpoint (e.g., `/api/v2/ingest`).*
+
+---
+
+## 5. Implementation Plan
+
+### Phase 1 – Metadata Creation
+- Implement `MetadataService`.
+- Update `IngestController::store()` to call service after chunking.
+- Persist metadata in `document_chunks.metadata`.
+- Add unit tests for summary length and keyword count.
+
+### Phase 2 – Smart Chunking
+- Refactor existing `chunkText()` into `DocumentChunker`.
+- Add regex rules for Markdown/HTML headers, lists, tables.
+- Expose optional `chunk_size` & `overlap` via API.
+- Integration test with sample markdown.
+
+### Phase 3 – Document Restructuring
+- Build `DocumentParser` using a lightweight parser (e.g., `league/commonmark`, `domdocument`).
+- Generate JSON structure and store in `structure` column.
+- Unit tests for nested headings, tables, code blocks.
+
+### Phase 4 – Weighted Keyword Extraction
+- Implement `KeywordExtractor`.
+- Compute TF‑IDF per chunk; optionally augment with embedding similarity.
+- Store weights in `chunk_keywords` table and expose via `/api/search?weights=true`.
+- Dashboard route to view/manage keyword list.
+
+*Each phase will be released as a separate commit, fully tested before merging.*
+
+---
+
+## 6. Risks & Mitigations
+
+| Risk | Impact | Mitigation |
+|------|--------|------------|
+| **Performance regression** in chunking on large PDFs | Slow ingest API | Benchmark; optimize regex; cache parsed structure. |
+| **High memory usage** during metadata extraction | Out‑of‑memory errors | Process chunks sequentially; use generators. |
+| **Embedding service overload** with many concurrent requests | Cache thrashing | Rate limit via Valkey; queue heavy jobs. |
+| **Incompatible client uploads** (non‑Markdown) | Incorrect parsing | Detect format early; fallback to plain text chunker. |
+| **Search quality degradation** if keywords are noisy | User dissatisfaction | Validate keyword extraction with manual review; provide admin override. |
+
+*All new code will be covered by unit and integration tests, and linted with Pint before merging.*
+
+---
+
+**Designed:** 2026-02-12 | **Senior-Architect** | **Status:** Ready for Implementation

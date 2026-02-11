@@ -1,6 +1,6 @@
 <?php
 
-use App\Http\Middleware\CacheApiResponses;
+use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\IngestController;
 use App\Http\Controllers\Api\SearchController;
 use Illuminate\Support\Facades\Route;
@@ -34,4 +34,12 @@ Route::middleware(['auth:sanctum', 'throttle:60,1', 'cache.api'])->group(functio
 
     // Node endpoints
     Route::get('/nodes/{id}', [SearchController::class, 'show'])->name('api.nodes.show');
+
+    // Document endpoints
+    Route::get('/documents', [DocumentController::class, 'index'])->name('api.documents.index');
+    Route::post('/documents', [DocumentController::class, 'store'])->name('api.documents.store');
+    Route::get('/documents/{id}', [DocumentController::class, 'show'])->name('api.documents.show');
+    Route::put('/documents/{id}', [DocumentController::class, 'update'])->name('api.documents.update');
+    Route::delete('/documents/{id}', [DocumentController::class, 'destroy'])->name('api.documents.destroy');
+    Route::get('/documents/{id}/chunks', [DocumentController::class, 'chunks'])->name('api.documents.chunks');
 });

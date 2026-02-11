@@ -1,11 +1,13 @@
 <?php
 
+use App\Models\Document;
 use App\Models\Edge;
 use App\Models\Embedding;
 use App\Models\Node;
 use App\Models\User;
 use App\Repositories\EdgeRepository;
 use App\Repositories\NodeRepository;
+use App\Services\DocumentService;
 use App\Services\EmbeddingService;
 use App\Services\VectorStore;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -117,6 +119,100 @@ describe('Knowledge Graph API', function () {
             $response->assertStatus(422)
                 ->assertJsonValidationErrors(['chunk_size']);
         });
+
+        it('can ingest with document metadata', function () {
+            $response = $this->actingAs($this->user)
+                ->postJson(route('api.ingest.store'), [
+                    'text' => 'This is a test document. It has multiple sentences for chunking.',
+                    'document' => [
+                        'title' => 'Q4 Policy Document',
+                        'source_type' => 'file',
+                        'source_path' => '/docs/policies/q4-2024.pdf',
+                        'metadata' => [
+                            'author' => 'Legal Team',
+                            'document_type' => 'policy',
+                        ],
+                    ],
+                ]);
+
+            $response->assertStatus(201)
+                ->assertJson([
+                    'success' => true,
+                ])
+                ->assertJsonStructure([
+                    'data' => [
+                        'node_ids',
+                        'chunk_count',
+                        'document' => [
+                            'id',
+                            'title',
+                            'source_type',
+                        ],
+                    ],
+                ]);
+
+            // Verify document was created
+            $documentId = $response->json('data.document.id');
+            $document = Document::find($documentId);
+            expect($document)->not->toBeNull();
+            expect($document->title)->toBe('Q4 Policy Document');
+
+            // Verify nodes are linked to document
+            $nodeIds = $response->json('data.node_ids');
+            foreach ($nodeIds as $nodeId) {
+                $node = Node::find($nodeId);
+                expect($node->document_id)->toBe($documentId);
+            }
+        });
+
+        it('validates document metadata when provided', function () {
+            $response = $this->actingAs($this->user)
+                ->postJson(route('api.ingest.store'), [
+                    'text' => 'Test content',
+                    'document' => [
+                        'title' => 'Test',
+                        'source_type' => 'invalid_type',
+                    ],
+                ]);
+
+            $response->assertStatus(422)
+                ->assertJsonValidationErrors(['document.source_type']);
+        });
+
+        it('requires document title when document object is provided', function () {
+            $response = $this->actingAs($this->user)
+                ->postJson(route('api.ingest.store'), [
+                    'text' => 'Test content',
+                    'document' => [
+                        'source_type' => 'file',
+                    ],
+                ]);
+
+            $response->assertStatus(422)
+                ->assertJsonValidationErrors(['document.title']);
+        });
+
+        it('maintains backward compatibility without document metadata', function () {
+            $response = $this->actingAs($this->user)
+                ->postJson(route('api.ingest.store'), [
+                    'text' => 'This is a test sentence. Here is another sentence.',
+                ]);
+
+            $response->assertStatus(201)
+                ->assertJson([
+                    'success' => true,
+                ]);
+
+            // Verify no document was created
+            expect($response->json('data.document'))->toBeNull();
+
+            // Verify nodes exist without document_id
+            $nodeIds = $response->json('data.node_ids');
+            foreach ($nodeIds as $nodeId) {
+                $node = Node::find($nodeId);
+                expect($node->document_id)->toBeNull();
+            }
+        });
     });
 
     describe('Search Endpoints', function () {
@@ -220,6 +316,91 @@ describe('Knowledge Graph API', function () {
             $results = $response->json('data.results');
             expect($results)->toHaveCount(1);
             expect($results[0]['type'])->toBe('tag');
+        });
+
+        it('returns document attribution in search results', function () {
+            // Create a document with nodes
+            $document = Document::factory()->create([
+                'title' => 'Laravel Documentation',
+                'source_type' => 'url',
+                'source_path' => 'https://laravel.com/docs',
+            ]);
+
+            $node = Node::factory()->create([
+                'type' => 'text_chunk',
+                'content' => 'Laravel is a PHP framework for web artisans.',
+                'document_id' => $document->id,
+            ]);
+
+            // Create embedding for the node
+            Embedding::factory()->create([
+                'node_id' => $node->id,
+                'embedding' => array_fill(0, 768, 0.1),
+            ]);
+
+            $response = $this->actingAs($this->user)
+                ->getJson(route('api.search', ['q' => 'Laravel framework']));
+
+            $response->assertOk()
+                ->assertJsonStructure([
+                    'success',
+                    'data' => [
+                        'query',
+                        'results' => [
+                            '*' => [
+                                'node' => [
+                                    'id',
+                                    'type',
+                                    'content',
+                                    'document_id',
+                                ],
+                                'score',
+                                'document' => [
+                                    'id',
+                                    'title',
+                                    'source_type',
+                                    'source_path',
+                                ],
+                            ],
+                        ],
+                        'count',
+                    ],
+                ]);
+
+            // Verify document attribution in results
+            $results = $response->json('data.results');
+            $foundNode = collect($results)->first(fn ($r) => $r['node']['id'] === $node->id);
+            expect($foundNode)->not->toBeNull();
+            expect($foundNode['document'])->not->toBeNull();
+            expect($foundNode['document']['id'])->toBe($document->id);
+            expect($foundNode['document']['title'])->toBe('Laravel Documentation');
+        });
+
+        it('returns null document for nodes without document', function () {
+            $node = Node::factory()->create([
+                'type' => 'text_chunk',
+                'content' => 'Standalone node without document.',
+                'document_id' => null,
+            ]);
+
+            // Create embedding for the node
+            Embedding::factory()->create([
+                'node_id' => $node->id,
+                'embedding' => array_fill(0, 768, 0.2),
+            ]);
+
+            $response = $this->actingAs($this->user)
+                ->getJson(route('api.search', ['q' => 'Standalone node']));
+
+            $response->assertOk();
+
+            // Find the node in results and verify document is null
+            $results = $response->json('data.results');
+            $foundNode = collect($results)->first(fn ($r) => $r['node']['id'] === $node->id);
+
+            if ($foundNode !== null) {
+                expect($foundNode['document'])->toBeNull();
+            }
         });
     });
 
@@ -473,6 +654,140 @@ describe('Knowledge Graph API', function () {
 
             expect(count($retrieved))->toBe(768);
             expect(abs($retrieved[0] - 0.5) < 0.01)->toBeTrue();
+        });
+
+        it('Document can have many nodes', function () {
+            $document = Document::factory()->create();
+
+            Node::factory()->count(3)->create([
+                'document_id' => $document->id,
+            ]);
+
+            expect($document->nodes)->toHaveCount(3);
+        });
+
+        it('Document can have embeddings through nodes', function () {
+            $document = Document::factory()->create();
+            $node = Node::factory()->create([
+                'document_id' => $document->id,
+            ]);
+            Embedding::factory()->create(['node_id' => $node->id]);
+
+            expect($document->embeddings)->toHaveCount(1);
+        });
+
+        it('Document casts metadata to array', function () {
+            $document = Document::factory()->create([
+                'metadata' => ['author' => 'Test Author', 'tags' => ['php', 'laravel']],
+            ]);
+
+            expect($document->metadata)->toBeArray();
+            expect($document->metadata['author'])->toBe('Test Author');
+        });
+
+        it('Document casts version to integer', function () {
+            $document = Document::factory()->create(['version' => 5]);
+
+            expect($document->version)->toBeInt();
+            expect($document->version)->toBe(5);
+        });
+
+        it('Document casts is_active to boolean', function () {
+            $document = Document::factory()->create(['is_active' => true]);
+
+            expect($document->is_active)->toBeBool();
+            expect($document->is_active)->toBeTrue();
+        });
+    });
+
+    describe('DocumentService', function () {
+        it('can create documents via DocumentService', function () {
+            $service = new DocumentService;
+
+            $document = $service->create([
+                'title' => 'Service Test Document',
+                'source_type' => 'api',
+                'metadata' => ['key' => 'value'],
+            ]);
+
+            expect($document)->toBeInstanceOf(Document::class);
+            expect($document->title)->toBe('Service Test Document');
+            expect($document->source_type)->toBe('api');
+        });
+
+        it('can find documents via DocumentService', function () {
+            $document = Document::factory()->create();
+            $service = new DocumentService;
+
+            $found = $service->find($document->id);
+
+            expect($found)->not->toBeNull();
+            expect($found->id)->toBe($document->id);
+        });
+
+        it('can list documents with pagination via DocumentService', function () {
+            Document::factory()->count(10)->create();
+            $service = new DocumentService;
+
+            $paginator = $service->list();
+
+            expect($paginator->total())->toBe(10);
+        });
+
+        it('can filter documents by source_type via DocumentService', function () {
+            Document::factory()->file()->count(3)->create();
+            Document::factory()->url()->count(2)->create();
+            $service = new DocumentService;
+
+            $results = $service->list(['source_type' => 'file']);
+
+            expect($results->total())->toBe(3);
+        });
+
+        it('can get document chunks via DocumentService', function () {
+            $document = Document::factory()->create();
+            Node::factory()->count(5)->create(['document_id' => $document->id]);
+            $service = new DocumentService;
+
+            $chunks = $service->getChunks($document->id);
+
+            expect($chunks)->toHaveCount(5);
+        });
+
+        it('can update documents via DocumentService', function () {
+            $document = Document::factory()->create(['title' => 'Old']);
+            $service = new DocumentService;
+
+            $service->update($document, ['title' => 'New']);
+
+            expect($document->fresh()->title)->toBe('New');
+        });
+
+        it('can delete documents via DocumentService', function () {
+            $document = Document::factory()->create();
+            $service = new DocumentService;
+
+            $service->delete($document);
+
+            expect(Document::find($document->id))->toBeNull();
+        });
+
+        it('can increment document version via DocumentService', function () {
+            $document = Document::factory()->create(['version' => 1]);
+            $service = new DocumentService;
+
+            $service->incrementVersion($document);
+
+            expect($document->fresh()->version)->toBe(2);
+        });
+
+        it('can activate/deactivate documents via DocumentService', function () {
+            $document = Document::factory()->create(['is_active' => true]);
+            $service = new DocumentService;
+
+            $service->setActive($document, false);
+
+            expect($document->fresh()->is_active)->toBeFalse();
         });
     });
 });
