@@ -10,6 +10,8 @@ use Livewire\Component;
 
 class DashboardStats extends Component
 {
+    use CacheableComponent;
+
     public int $nodeCount = 0;
 
     public int $edgeCount = 0;
@@ -38,13 +40,44 @@ class DashboardStats extends Component
     {
         $this->isLoading = true;
 
+        // Use cached stats for faster loads
+        $stats = $this->getCachedStats();
+
+        $this->nodeCount = $stats['nodeCount'];
+        $this->edgeCount = $stats['edgeCount'];
+        $this->embeddingCount = $stats['embeddingCount'];
+        $this->nodeTypeDistribution = $stats['nodeTypeDistribution'];
+        $this->recentNodes = $stats['recentNodes'];
+
+        $this->isLoading = false;
+    }
+
+    /**
+     * Get cached statistics.
+     *
+     * @return array
+     */
+    protected function getCachedStats(): array
+    {
+        return $this->getCachedData('stats', function () {
+            return $this->computeStats();
+        }, 60); // Cache for 1 minute
+    }
+
+    /**
+     * Compute statistics (uncached).
+     *
+     * @return array
+     */
+    protected function computeStats(): array
+    {
         // Get counts
-        $this->nodeCount = Node::count();
-        $this->edgeCount = Edge::count();
-        $this->embeddingCount = Embedding::count();
+        $nodeCount = Node::count();
+        $edgeCount = Edge::count();
+        $embeddingCount = Embedding::count();
 
         // Get node type distribution
-        $this->nodeTypeDistribution = Node::query()
+        $nodeTypeDistribution = Node::query()
             ->select('type', DB::raw('count(*) as count'))
             ->groupBy('type')
             ->orderByDesc('count')
@@ -57,7 +90,7 @@ class DashboardStats extends Component
             ->toArray();
 
         // Get recent nodes
-        $this->recentNodes = Node::query()
+        $recentNodes = Node::query()
             ->with('embedding')
             ->latest()
             ->limit(5)
@@ -71,12 +104,20 @@ class DashboardStats extends Component
             ])
             ->toArray();
 
-        $this->isLoading = false;
+        return [
+            'nodeCount' => $nodeCount,
+            'edgeCount' => $edgeCount,
+            'embeddingCount' => $embeddingCount,
+            'nodeTypeDistribution' => $nodeTypeDistribution,
+            'recentNodes' => $recentNodes,
+        ];
     }
 
     public function refreshStats(): void
     {
+        $this->clearComponentCache('stats');
         $this->loadStats();
+        $this->dispatch('stats-refreshed');
     }
 
     public function render()

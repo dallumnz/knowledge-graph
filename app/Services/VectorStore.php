@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Embedding;
 use App\Models\Node;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\RateLimiter;
@@ -52,6 +53,16 @@ class VectorStore
     private string $rateLimitPrefix = 'vector_search:';
 
     /**
+     * Search result cache TTL in seconds.
+     */
+    private int $cacheTtl;
+
+    /**
+     * Whether search caching is enabled.
+     */
+    private bool $cacheEnabled;
+
+    /**
      * Create a new vector store instance.
      */
     public function __construct()
@@ -59,17 +70,41 @@ class VectorStore
         $this->dimensions = config('ai.vector_store.dimensions', 768);
         $this->metric = config('ai.vector_store.metric', 'cosine');
         $this->maxVectorValue = config('ai.vector_store.max_vector_value', 1e10);
+        $this->cacheTtl = config('ai.vector_store.cache_ttl', 600); // 10 minutes
+        $this->cacheEnabled = config('ai.vector_store.cache_enabled', false);
+    }
+
+    /**
+     * Get a unique cache key for a search query.
+     *
+     * @param array $queryVector
+     * @param int $limit
+     * @param float $minSimilarity
+     * @return string
+     */
+    private function getSearchCacheKey(array $queryVector, int $limit, float $minSimilarity): string
+    {
+        $hash = hash('sha256', json_encode([
+            'v' => $queryVector,
+            'l' => $limit,
+            'm' => $minSimilarity,
+            'metric' => $this->metric,
+        ]));
+
+        return "vector_search:{$hash}";
     }
 
     /**
      * Perform a k-NN search for similar vectors using pgvector.
      *
      * Uses the <=> (cosine distance) operator for similarity search.
+     * Supports caching of search results for repeated queries.
      *
      * @param  array<float>  $queryVector  The query embedding vector
      * @param  int  $limit  Maximum number of results to return
      * @param  float  $minSimilarity  Minimum similarity threshold (0-1 for cosine)
      * @param  string|null  $rateLimitKey  Key for rate limiting (null to skip)
+     * @param  bool  $useCache  Whether to use cache (default: true if enabled)
      * @return array<int, array{node: Node, score: float}> Array of results with node and similarity score
      *
      * @throws InvalidArgumentException If vector validation fails
@@ -80,7 +115,19 @@ class VectorStore
         int $limit = 10,
         float $minSimilarity = 0.0,
         ?string $rateLimitKey = null,
+        bool $useCache = true,
     ): array {
+        // Check cache first if enabled
+        if ($this->cacheEnabled && $useCache) {
+            $cacheKey = $this->getSearchCacheKey($queryVector, $limit, $minSimilarity);
+            $cached = Cache::get($cacheKey);
+
+            if ($cached !== null) {
+                Log::debug('Search cache hit', ['key' => $cacheKey]);
+                return $cached;
+            }
+        }
+
         // Security: Validate and sanitize inputs
         $this->validateVector($queryVector);
         $this->validateSearchParams($limit, $minSimilarity);
@@ -117,7 +164,15 @@ class VectorStore
                 ->get();
 
             // Map results to nodes with distance-to-similarity conversion
-            return $this->mapResultsToNodes($results, $this->metric);
+            $mappedResults = $this->mapResultsToNodes($results, $this->metric);
+
+            // Cache results if enabled
+            if ($this->cacheEnabled && $useCache) {
+                $cacheKey = $this->getSearchCacheKey($queryVector, $limit, $minSimilarity);
+                Cache::set($cacheKey, $mappedResults, $this->cacheTtl);
+            }
+
+            return $mappedResults;
         } catch (\Exception $e) {
             Log::error('pgvector similarity search failed', [
                 'message' => $e->getMessage(),

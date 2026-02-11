@@ -64,7 +64,7 @@ return [
         'model' => env('AI_EMBEDDING_MODEL', 'text-embedding-nomic-embed-text-v2'),
         'dimensions' => (int) env('AI_EMBEDDING_DIMENSIONS', 768),
         'cache' => env('AI_EMBEDDING_CACHE', false),
-        'cache_ttl' => (int) env('AI_EMBEDDING_CACHE_TTL', 3600),
+        'cache_ttl' => (int) env('AI_EMBEDDING_CACHE_TTL', 86400), // 24 hours
         'max_retries' => (int) env('AI_EMBEDDING_MAX_RETRIES', 3),
         'retry_delay_ms' => (int) env('AI_EMBEDDING_RETRY_DELAY_MS', 1000),
     ],
@@ -96,6 +96,8 @@ return [
         'embedding_column' => 'embedding',
         'dimensions' => (int) env('AI_EMBEDDING_DIMENSIONS', 768),
         'metric' => env('AI_VECTOR_METRIC', 'cosine'), // cosine, l2, ip
+        'cache_enabled' => env('AI_VECTOR_CACHE_ENABLED', false),
+        'cache_ttl' => (int) env('AI_VECTOR_CACHE_TTL', 600), // 10 minutes
     ],
 
 ];

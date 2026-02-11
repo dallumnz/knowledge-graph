@@ -6,12 +6,13 @@ use App\Models\Embedding;
 use App\Models\Node;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 
 /**
  * Service for generating and managing embeddings using LMStudio.
  *
  * Makes direct HTTP calls to LMStudio's OpenAI-compatible embeddings API.
- * No Laravel AI SDK dependency needed.
+ * Supports caching of embeddings to avoid re-calling LMStudio for same text.
  */
 class EmbeddingService
 {
@@ -41,6 +42,16 @@ class EmbeddingService
     private int $retryDelayMs;
 
     /**
+     * Whether to cache embeddings.
+     */
+    private bool $cacheEnabled;
+
+    /**
+     * Cache TTL in seconds.
+     */
+    private int $cacheTtl;
+
+    /**
      * Create a new embedding service instance.
      */
     public function __construct()
@@ -50,12 +61,15 @@ class EmbeddingService
         $this->dimensions = config('ai.embeddings.dimensions', 768);
         $this->maxRetries = config('ai.embeddings.max_retries', 3);
         $this->retryDelayMs = config('ai.embeddings.retry_delay_ms', 1000);
+        $this->cacheEnabled = config('ai.embeddings.cache', false);
+        $this->cacheTtl = config('ai.embeddings.cache_ttl', 86400); // 24 hours
     }
 
     /**
      * Generate an embedding for the given text using LMStudio.
      *
-     * Makes direct HTTP call to LMStudio's /v1/embeddings endpoint.
+     * Checks cache first if enabled. Makes direct HTTP call to LMStudio's
+     * /v1/embeddings endpoint.
      *
      * @param string $text
      * @return array<float>|null
@@ -65,6 +79,17 @@ class EmbeddingService
         if (empty(trim($text))) {
             Log::warning('Empty text provided for embedding');
             return null;
+        }
+
+        // Check cache first
+        if ($this->cacheEnabled) {
+            $cacheKey = $this->getEmbeddingCacheKey($text);
+            $cached = Cache::get($cacheKey);
+
+            if ($cached !== null) {
+                Log::debug('Embedding cache hit', ['key' => $cacheKey]);
+                return $cached;
+            }
         }
 
         $lastException = null;
@@ -102,6 +127,11 @@ class EmbeddingService
                     Log::info('Embedding generated after retry', ['attempt' => $attempt]);
                 }
 
+                // Cache the embedding if enabled
+                if ($this->cacheEnabled && $embedding !== null) {
+                    Cache::set($this->getEmbeddingCacheKey($text), $embedding, $this->cacheTtl);
+                }
+
                 return $embedding;
             } catch (\Exception $e) {
                 $lastException = $e;
@@ -126,6 +156,60 @@ class EmbeddingService
     }
 
     /**
+     * Generate an embedding with caching.
+     *
+     * Wrapper that always uses cache if enabled.
+     *
+     * @param string $text
+     * @return array<float>|null
+     */
+    public function generateEmbeddingCached(string $text): ?array
+    {
+        if (!$this->cacheEnabled) {
+            return $this->generateEmbedding($text);
+        }
+
+        $cacheKey = $this->getEmbeddingCacheKey($text);
+
+        return Cache::remember($cacheKey, $this->cacheTtl, function () use ($text) {
+            return $this->generateEmbedding($text);
+        });
+    }
+
+    /**
+     * Get the cache key for an embedding.
+     *
+     * @param string $text
+     * @return string
+     */
+    private function getEmbeddingCacheKey(string $text): string
+    {
+        return 'embedding:' . hash('sha256', $text);
+    }
+
+    /**
+     * Clear the embedding cache for a specific text.
+     *
+     * @param string $text
+     * @return bool
+     */
+    public function clearEmbeddingCache(string $text): bool
+    {
+        return Cache::forget($this->getEmbeddingCacheKey($text));
+    }
+
+    /**
+     * Clear all embedding cache.
+     *
+     * @return bool
+     */
+    public function clearAllEmbeddingCache(): bool
+    {
+        $keys = Cache::tags(['embeddings'])->get('*');
+        return Cache::tags(['embeddings'])->flush();
+    }
+
+    /**
      * Generate embeddings for multiple texts in a batch.
      *
      * @param  array<string>  $texts  Array of texts to embed
@@ -136,7 +220,10 @@ class EmbeddingService
         $results = [];
 
         foreach ($texts as $text) {
-            $results[] = $this->generateEmbedding($text);
+            // Use cached version if cache is enabled
+            $results[] = $this->cacheEnabled
+                ? $this->generateEmbeddingCached($text)
+                : $this->generateEmbedding($text);
         }
 
         return $results;
@@ -159,7 +246,10 @@ class EmbeddingService
             return null;
         }
 
-        $vector = $this->generateEmbedding($node->content);
+        // Use cached version if cache is enabled
+        $vector = $this->cacheEnabled
+            ? $this->generateEmbeddingCached($node->content)
+            : $this->generateEmbedding($node->content);
 
         if ($vector === null) {
             Log::error('Failed to generate embedding for node', ['node_id' => $node->id]);

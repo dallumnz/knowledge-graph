@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\CacheApiResponses;
 use App\Http\Controllers\Api\IngestController;
 use App\Http\Controllers\Api\SearchController;
 use Illuminate\Support\Facades\Route;
@@ -16,9 +17,14 @@ use Illuminate\Support\Facades\Route;
 | Rate Limiting: All API routes are throttled to 60 requests per minute
 | per user (authenticated via Sanctum). Adjust in throttle middleware.
 |
+| API Caching:
+| - Enable via CACHE_API_ENABLED=true in .env
+| - Configure TTL via CACHE_API_TTL (seconds)
+| - Cache applies to GET /api/search, /api/search/text, /api/nodes/{id}
+|
 */
 
-Route::middleware(['auth:sanctum', 'throttle:60,1'])->group(function () {
+Route::middleware(['auth:sanctum', 'throttle:60,1', 'cache.api'])->group(function () {
     // Ingestion endpoints
     Route::post('/ingest', [IngestController::class, 'store'])->name('api.ingest.store');
 
