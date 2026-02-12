@@ -2,6 +2,7 @@
 """
 MCP Wrapper for Handoff Tool
 Exposes handoff functionality as MCP tools
+Runs as a persistent MCP server
 """
 
 import json
@@ -12,34 +13,6 @@ from pathlib import Path
 
 # Path to the actual handoff script
 HANDOFF_SCRIPT = Path(__file__).parent / "handoff.py"
-
-
-def handle_request():
-    """Handle MCP request from OpenCode."""
-    try:
-        # Read JSON-RPC request from stdin
-        request = json.load(sys.stdin)
-        
-        method = request.get("method", "")
-        params = request.get("params", {})
-        
-        if method == "handoff.generate":
-            result = run_handoff("generate", params)
-            return {"result": result}
-        
-        elif method == "handoff.status":
-            result = run_handoff("status", params)
-            return {"result": result}
-        
-        elif method == "handoff.resume":
-            result = run_handoff("resume", params)
-            return {"result": result}
-        
-        else:
-            return {"error": f"Unknown method: {method}"}
-            
-    except Exception as e:
-        return {"error": str(e)}
 
 
 def run_handoff(command: str, params: dict) -> dict:
@@ -60,17 +33,79 @@ def run_handoff(command: str, params: dict) -> dict:
         result = subprocess.run(
             args,
             capture_output=True,
-            text=True
+            text=True,
+            timeout=30
         )
         return {
             "success": result.returncode == 0,
-            "output": result.stdout,
-            "error": result.stderr
+            "output": result.stdout.strip(),
+            "error": result.stderr.strip() if result.stderr else None
         }
+    except subprocess.TimeoutExpired:
+        return {"success": False, "error": "Command timed out"}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
+def handle_request(request: dict) -> dict:
+    """Handle a single JSON-RPC request."""
+    method = request.get("method", "")
+    params = request.get("params", {})
+    
+    if method == "handoff.generate":
+        return run_handoff("generate", params)
+    
+    elif method == "handoff.status":
+        return run_handoff("status", params)
+    
+    elif method == "handoff.resume":
+        return run_handoff("resume", params)
+    
+    elif method == "initialize":
+        return {
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "result": {
+                "name": "handoff",
+                "version": "1.0.0",
+                "capabilities": {}
+            }
+        }
+    
+    elif method == "notifications/initialized":
+        return {"jsonrpc": "2.0", "result": None}
+    
+    else:
+        return {
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "error": {"code": -32601, "message": f"Unknown method: {method}"}
+        }
+
+
+def main():
+    """Main MCP server loop."""
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+            
+        try:
+            request = json.loads(line)
+            response = handle_request(request)
+            
+            # Ensure jsonrpc field is present
+            if "jsonrpc" not in response:
+                response = {"jsonrpc": "2.0", "result": response}
+            
+            print(json.dumps(response))
+            sys.stdout.flush()
+            
+        except json.JSONDecodeError:
+            error = {"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}}
+            print(json.dumps(error))
+            sys.stdout.flush()
+
+
 if __name__ == "__main__":
-    response = handle_request()
-    print(json.dumps(response))
+    main()
