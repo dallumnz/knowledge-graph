@@ -66,9 +66,12 @@ def handle_request(request: dict) -> dict:
             "jsonrpc": "2.0",
             "id": request.get("id"),
             "result": {
-                "name": "handoff",
-                "version": "1.0.0",
-                "capabilities": {}
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "serverInfo": {
+                    "name": "handoff",
+                    "version": "1.0.0"
+                }
             }
         }
     
@@ -93,10 +96,6 @@ def main():
         try:
             request = json.loads(line)
             response = handle_request(request)
-            
-            # Ensure jsonrpc field is present
-            if "jsonrpc" not in response:
-                response = {"jsonrpc": "2.0", "result": response}
             
             print(json.dumps(response))
             sys.stdout.flush()
