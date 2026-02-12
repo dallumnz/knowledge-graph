@@ -17,7 +17,7 @@
                 "python",
                 ".opencode/scripts/mcp_wrapper.py"
             ],
-            "env": {}
+            "environment": {}
         }
     }
 }
