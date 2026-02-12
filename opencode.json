@@ -11,7 +11,7 @@
             ]
         },
         "handoff": {
-            "type": "stdio",
+            "type": "local",
             "enabled": true,
             "command": [
                 "python",
