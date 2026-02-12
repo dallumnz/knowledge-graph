@@ -9,6 +9,15 @@
                 "artisan",
                 "boost:mcp"
             ]
+        },
+        "handoff": {
+            "type": "stdio",
+            "enabled": true,
+            "command": [
+                "python",
+                ".opencode/scripts/mcp_wrapper.py"
+            ],
+            "env": {}
         }
     }
 }
