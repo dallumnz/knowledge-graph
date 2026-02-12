@@ -78,6 +78,55 @@ def handle_request(request: dict) -> dict:
     elif method == "notifications/initialized":
         return {"jsonrpc": "2.0", "result": None}
     
+    elif method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": request.get("id"),
+            "result": {
+                "tools": [
+                    {
+                        "name": "handoff.generate",
+                        "description": "Generate a handoff document",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string", "description": "Project directory path"},
+                                "task": {"type": "string", "description": "Brief task name"},
+                                "completed": {"type": "array", "items": {"type": "string"}, "description": "Completed items"},
+                                "next_steps": {"type": "array", "items": {"type": "string"}, "description": "Next steps"},
+                                "git": {"type": "boolean", "description": "Include git status"},
+                                "commits": {"type": "integer", "description": "Number of recent commits"},
+                                "pending": {"type": "boolean", "description": "Include pending items"}
+                            },
+                            "required": ["path", "task"]
+                        }
+                    },
+                    {
+                        "name": "handoff.status",
+                        "description": "Check handoff status",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string", "description": "Project directory path"}
+                            },
+                            "required": ["path"]
+                        }
+                    },
+                    {
+                        "name": "handoff.resume",
+                        "description": "Resume from a handoff document",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "path": {"type": "string", "description": "Project directory path"}
+                            },
+                            "required": ["path"]
+                        }
+                    }
+                ]
+            }
+        }
+    
     else:
         return {
             "jsonrpc": "2.0",
