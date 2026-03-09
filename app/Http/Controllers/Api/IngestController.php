@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\GenerateEmbedding;
 use App\Repositories\EdgeRepository;
 use App\Repositories\NodeRepository;
 use App\Services\Chunking\DocumentChunker;
@@ -103,8 +104,8 @@ class IngestController extends Controller
 
                     $nodeIds[] = $node->id;
 
-                    // Generate and store embedding
-                    $this->embeddingService->createEmbeddingForNode($node);
+                    // Dispatch embedding generation job (also triggers question generation)
+                    GenerateEmbedding::dispatch($node);
 
                     // Create sequential edge if not first chunk
                     if ($previousNode !== null) {
@@ -263,8 +264,8 @@ class IngestController extends Controller
 
                     $nodeIds[] = $node->id;
 
-                    // Generate and store embedding
-                    $this->embeddingService->createEmbeddingForNode($node);
+                    // Dispatch embedding generation job (also triggers question generation)
+                    GenerateEmbedding::dispatch($node);
 
                     // Create sequential edge if not first chunk
                     if ($previousNode !== null) {

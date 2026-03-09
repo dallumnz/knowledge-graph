@@ -2,9 +2,9 @@
 
 namespace App\Livewire;
 
+use App\Jobs\GenerateEmbedding;
 use App\Repositories\EdgeRepository;
 use App\Repositories\NodeRepository;
-use App\Services\EmbeddingService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Livewire\Component;
@@ -46,7 +46,6 @@ class QuickIngest extends Component
         try {
             $nodeRepository = app(NodeRepository::class);
             $edgeRepository = app(EdgeRepository::class);
-            $embeddingService = app(EmbeddingService::class);
 
             // Combine title and content for ingestion
             $text = $this->title."\n\n".$this->content;
@@ -55,7 +54,7 @@ class QuickIngest extends Component
             $chunks = $this->chunkText($text, $chunkSize);
             $nodeIds = [];
 
-            DB::transaction(function () use ($chunks, $nodeRepository, $edgeRepository, $embeddingService, &$nodeIds) {
+            DB::transaction(function () use ($chunks, $nodeRepository, $edgeRepository, &$nodeIds) {
                 $previousNode = null;
 
                 foreach ($chunks as $index => $chunk) {
@@ -67,8 +66,8 @@ class QuickIngest extends Component
 
                     $nodeIds[] = $node->id;
 
-                    // Generate and store embedding
-                    $embeddingService->createEmbeddingForNode($node);
+                    // Dispatch embedding generation job (also triggers question generation)
+                    GenerateEmbedding::dispatch($node);
 
                     // Create sequential edge if not first chunk
                     if ($previousNode !== null) {
@@ -85,7 +84,7 @@ class QuickIngest extends Component
             });
 
             $this->ingestedNodes = $nodeIds;
-            $this->successMessage = 'Content ingested successfully! Created '.count($nodeIds).' node(s).';
+            $this->successMessage = 'Content ingested successfully! Created '.count($nodeIds).' node(s). Embeddings and questions will be generated in the background.';
 
             // Clear form after successful ingestion
             $this->title = '';

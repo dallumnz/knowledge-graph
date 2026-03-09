@@ -44,6 +44,9 @@ class GenerateEmbedding implements ShouldQueue
             $embeddingService->createEmbeddingForNode($this->node);
 
             Log::info('Embedding generated successfully', ['node_id' => $this->node->id]);
+
+            // Dispatch hypothetical question generation after successful embedding
+            $this->dispatchQuestionGeneration();
         } catch (\Exception $e) {
             Log::error('Failed to generate embedding', [
                 'node_id' => $this->node->id,
@@ -51,6 +54,33 @@ class GenerateEmbedding implements ShouldQueue
             ]);
 
             throw $e;
+        }
+    }
+
+    /**
+     * Dispatch hypothetical question generation job.
+     */
+    private function dispatchQuestionGeneration(): void
+    {
+        // Check if feature is enabled
+        if (!config('ai.features.hypothetical_questions', true)) {
+            return;
+        }
+
+        try {
+            // Dispatch the job to the same queue for ordering
+            GenerateHypotheticalQuestions::dispatch($this->node)
+                ->onQueue('embeddings');
+
+            Log::debug('Dispatched hypothetical question generation', [
+                'node_id' => $this->node->id,
+            ]);
+        } catch (\Exception $e) {
+            Log::warning('Failed to dispatch question generation job', [
+                'node_id' => $this->node->id,
+                'error' => $e->getMessage(),
+            ]);
+            // Don't throw - this is non-critical
         }
     }
 
