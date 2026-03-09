@@ -246,4 +246,55 @@ return [
         'source_types' => ['file', 'url', 'text', 'api'],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Validation Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for the RAG validation layer (Phase 4).
+    |
+    | Nodes:
+    | - gatekeeper: Checks if response answers the user's question
+    | - auditor: Verifies claims are supported by retrieved context
+    | - strategist: Evaluates broader context and business sense
+    |
+    | Modes:
+    | - strict_mode: All nodes must pass (true) or lenient (false)
+    | - fail_action: What to do on validation failure
+    |   * 'fallback': Return a fallback message
+    |   * 'retry': Attempt to regenerate the response
+    |   * 'reject': Return an error response
+    | - early_exit: Stop on first failure (faster but less thorough)
+    |
+    */
+
+    'validation' => [
+        'enabled' => env('AI_VALIDATION_ENABLED', true),
+        'strict_mode' => env('AI_VALIDATION_STRICT_MODE', false),
+        'nodes' => explode(',', env('AI_VALIDATION_NODES', 'gatekeeper,auditor,strategist')),
+        'fail_action' => env('AI_VALIDATION_FAIL_ACTION', 'fallback'), // 'fallback', 'retry', 'reject'
+        'early_exit' => env('AI_VALIDATION_EARLY_EXIT', false),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | RAG Query Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for the end-to-end RAG query service.
+    |
+    | - context_chunks: Default number of chunks to retrieve
+    | - max_context_length: Maximum context length for LLM prompt
+    | - temperature: Response generation temperature
+    | - max_tokens: Maximum tokens for generated responses
+    |
+    */
+
+    'rag' => [
+        'context_chunks' => (int) env('AI_RAG_CONTEXT_CHUNKS', 5),
+        'max_context_length' => (int) env('AI_RAG_MAX_CONTEXT_LENGTH', 4000),
+        'temperature' => (float) env('AI_RAG_TEMPERATURE', 0.7),
+        'max_tokens' => (int) env('AI_RAG_MAX_TOKENS', 1024),
+    ],
+
 ];

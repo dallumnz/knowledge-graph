@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Repositories\NodeRepository;
 use App\Services\Ai\HybridSearchService;
+use App\Services\Ai\RagQueryService;
 use App\Services\Ai\ReRankingService;
 use App\Services\DocumentService;
 use App\Services\EmbeddingService;
@@ -22,9 +23,11 @@ class SearchController extends Controller
         private DocumentService $documentService,
         private ?HybridSearchService $hybridSearchService = null,
         private ?ReRankingService $reRankingService = null,
+        private ?RagQueryService $ragQueryService = null,
     ) {
         $this->hybridSearchService ??= new HybridSearchService($vectorStore, $embeddingService);
         $this->reRankingService ??= new ReRankingService();
+        $this->ragQueryService ??= new RagQueryService();
     }
 
     /**
@@ -356,6 +359,84 @@ class SearchController extends Controller
                 'results' => $formattedResults,
                 'count' => count($formattedResults),
                 'method' => $method,
+            ],
+        ]);
+    }
+
+    /**
+     * RAG query endpoint with full validation pipeline.
+     *
+     * POST /api/rag/query
+     *
+     * Request body:
+     * {
+     *   "query": "string (required) - The user's question",
+     *   "validate": "boolean (default: true) - Enable validation",
+     *   "nodes": ["array of validation nodes to run (default: all)"],
+     *   "context_chunks": "integer (default: 5) - Number of chunks to retrieve",
+     *   "rerank": "boolean (default: true) - Enable re-ranking",
+     *   "alpha": "float (default: 0.7) - Vector/keyword balance (0.0-1.0)"
+     * }
+     *
+     * Response includes:
+     * - response: The generated and validated answer
+     * - confidence_score: Overall confidence (0.0-1.0)
+     * - sources: Retrieved source chunks with relevance scores
+     * - validation: Detailed validation results from each node
+     * - timing: Performance metrics
+     */
+    public function ragQuery(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'query' => 'required|string|min:1|max:1000',
+            'validate' => 'nullable|boolean',
+            'nodes' => 'nullable|array',
+            'nodes.*' => 'string|in:gatekeeper,auditor,strategist',
+            'context_chunks' => 'nullable|integer|min:1|max:20',
+            'rerank' => 'nullable|boolean',
+            'alpha' => 'nullable|numeric|min:0|max:1',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $options = [
+            'validate' => $request->boolean('validate', true),
+            'context_chunks' => $request->input('context_chunks'),
+            'rerank' => $request->boolean('rerank', true),
+            'alpha' => $request->input('alpha'),
+        ];
+
+        // Add specific nodes if provided
+        if ($request->has('nodes')) {
+            $options['nodes'] = $request->input('nodes');
+        }
+
+        $query = $request->input('query');
+
+        // Execute RAG query
+        $result = $this->ragQueryService->query($query, $options);
+
+        if (!$result['success']) {
+            return response()->json([
+                'success' => false,
+                'message' => $result['error'] ?? 'Query failed',
+            ], 500);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'query' => $result['query'],
+                'response' => $result['response'],
+                'confidence_score' => $result['confidence_score'],
+                'sources' => $result['sources'],
+                'validation' => $result['validation'],
+                'timing' => $result['timing'],
             ],
         ]);
     }

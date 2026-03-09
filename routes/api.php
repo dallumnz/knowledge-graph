@@ -33,6 +33,9 @@ Route::middleware(['auth:sanctum', 'throttle:60,1', 'cache.api'])->group(functio
     Route::get('/search/hybrid', [SearchController::class, 'hybrid'])->name('api.search.hybrid');
     Route::get('/search/text', [SearchController::class, 'textSearch'])->name('api.search.text');
 
+    // RAG query endpoint with validation
+    Route::post('/rag/query', [SearchController::class, 'ragQuery'])->name('api.rag.query');
+
     // Node endpoints
     Route::get('/nodes/{id}', [SearchController::class, 'show'])->name('api.nodes.show');
 
