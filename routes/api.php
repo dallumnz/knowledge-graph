@@ -30,6 +30,7 @@ Route::middleware(['auth:sanctum', 'throttle:60,1', 'cache.api'])->group(functio
 
     // Search endpoints
     Route::get('/search', [SearchController::class, 'search'])->name('api.search');
+    Route::get('/search/hybrid', [SearchController::class, 'hybrid'])->name('api.search.hybrid');
     Route::get('/search/text', [SearchController::class, 'textSearch'])->name('api.search.text');
 
     // Node endpoints

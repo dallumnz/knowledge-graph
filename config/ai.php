@@ -194,6 +194,34 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Search Configuration
+    |--------------------------------------------------------------------------
+    |
+    | Configuration for hybrid search and re-ranking.
+    |
+    | Weights:
+    | - vector_weight: Weight for vector similarity search (0.0-1.0)
+    | - keyword_weight: Weight for keyword/full-text search (0.0-1.0)
+    | - question_weight: Weight for hypothetical question matching (0.0-1.0)
+    |
+    | Re-ranking:
+    | - rerank_top_n: Number of results to consider for re-ranking
+    | - final_results: Number of final results to return after re-ranking
+    | - enable_reranking: Whether to enable LLM-based re-ranking
+    |
+    */
+
+    'search' => [
+        'vector_weight' => (float) env('AI_SEARCH_VECTOR_WEIGHT', 0.6),
+        'keyword_weight' => (float) env('AI_SEARCH_KEYWORD_WEIGHT', 0.3),
+        'question_weight' => (float) env('AI_SEARCH_QUESTION_WEIGHT', 0.1),
+        'rerank_top_n' => (int) env('AI_SEARCH_RERANK_TOP_N', 20),
+        'final_results' => (int) env('AI_SEARCH_FINAL_RESULTS', 5),
+        'enable_reranking' => env('AI_SEARCH_ENABLE_RERANKING', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Document Storage Configuration
     |--------------------------------------------------------------------------
     |
