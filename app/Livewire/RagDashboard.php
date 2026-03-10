@@ -6,7 +6,7 @@ use App\Models\RagMetrics;
 use App\Models\UserFeedback;
 use App\Services\Ai\Evaluation\MetricsService;
 use App\Services\Ai\Evaluation\FeedbackService;
-use Carbon\Carbon;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 use Livewire\Component;
 
@@ -75,7 +75,7 @@ class RagDashboard extends Component
     /**
      * Get summary metrics.
      */
-    private function getSummaryMetrics(Carbon $startDate, Carbon $endDate): array
+    private function getSummaryMetrics(CarbonInterface $startDate, CarbonInterface $endDate): array
     {
         $metrics = RagMetrics::inDateRange($startDate, $endDate);
         $totalQueries = $metrics->count();
