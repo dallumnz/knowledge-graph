@@ -32,6 +32,33 @@
 
         {{-- Ingest Form --}}
         <form wire:submit="ingest" class="space-y-4">
+            {{-- File Upload --}}
+            <div>
+                <flux:label for="uploadedFile">Upload Document (Optional)</flux:label>
+                <flux:input
+                    type="file"
+                    wire:model="uploadedFile"
+                    id="uploadedFile"
+                    accept=".txt,.md,.pdf,.doc,.docx"
+                    class="mt-1 w-full"
+                />
+                @error('uploadedFile')
+                    <flux:error class="mt-1">{{ $message }}</flux:error>
+                @enderror
+                <flux:text class="mt-1 text-xs text-zinc-500">
+                    Supported: TXT, MD, PDF, DOC, DOCX (max 10MB)
+                </flux:text>
+            </div>
+
+            <div class="relative">
+                <div class="absolute inset-0 flex items-center" aria-hidden="true">
+                    <div class="w-full border-t border-zinc-300 dark:border-zinc-600"></div>
+                </div>
+                <div class="relative flex justify-center">
+                    <span class="bg-white dark:bg-zinc-800 px-2 text-sm text-zinc-500">Or enter text manually</span>
+                </div>
+            </div>
+
             <div>
                 <flux:label for="title">Title</flux:label>
                 <flux:input

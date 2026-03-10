@@ -5,15 +5,22 @@ namespace App\Livewire;
 use App\Jobs\GenerateEmbedding;
 use App\Repositories\EdgeRepository;
 use App\Repositories\NodeRepository;
+use App\Services\DocumentService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 
 class QuickIngest extends Component
 {
+    use WithFileUploads;
+
     public string $title = '';
 
     public string $content = '';
+
+    public $uploadedFile = null;
 
     public bool $isIngesting = false;
 
@@ -24,8 +31,9 @@ class QuickIngest extends Component
     public array $ingestedNodes = [];
 
     protected array $rules = [
-        'title' => 'required|string|max:255',
-        'content' => 'required|string|min:1',
+        'title' => 'required_without:uploadedFile|string|max:255',
+        'content' => 'required_without:uploadedFile|string|min:1',
+        'uploadedFile' => 'nullable|file|max:10240|mimes:txt,md,pdf,doc,docx',
     ];
 
     public function updated(): void
@@ -47,8 +55,17 @@ class QuickIngest extends Component
             $nodeRepository = app(NodeRepository::class);
             $edgeRepository = app(EdgeRepository::class);
 
-            // Combine title and content for ingestion
-            $text = $this->title."\n\n".$this->content;
+            // Handle file upload if present
+            if ($this->uploadedFile) {
+                $text = $this->extractTextFromFile($this->uploadedFile);
+                if (empty($this->title)) {
+                    $this->title = $this->uploadedFile->getClientOriginalName();
+                }
+            } else {
+                // Use text input
+                $text = $this->title."\n\n".$this->content;
+            }
+            
             $chunkSize = 500;
 
             $chunks = $this->chunkText($text, $chunkSize);
@@ -89,6 +106,7 @@ class QuickIngest extends Component
             // Clear form after successful ingestion
             $this->title = '';
             $this->content = '';
+            $this->uploadedFile = null;
 
             // Dispatch event to refresh stats
             $this->dispatch('node-created');
@@ -101,6 +119,69 @@ class QuickIngest extends Component
         }
 
         $this->isIngesting = false;
+    }
+
+    /**
+     * Extract text content from uploaded file.
+     *
+     * Supports: txt, md, pdf (basic), doc, docx (basic)
+     */
+    private function extractTextFromFile($file): string
+    {
+        $extension = strtolower($file->getClientOriginalExtension());
+        $path = $file->getRealPath();
+
+        return match ($extension) {
+            'txt', 'md' => file_get_contents($path),
+            'pdf' => $this->extractTextFromPdf($path),
+            'doc', 'docx' => $this->extractTextFromDoc($path),
+            default => file_get_contents($path),
+        };
+    }
+
+    /**
+     * Extract text from PDF (basic text extraction).
+     */
+    private function extractTextFromPdf(string $path): string
+    {
+        // Try pdftotext if available
+        if (shell_exec('which pdftotext')) {
+            $output = shell_exec("pdftotext -layout " . escapeshellarg($path) . " -");
+            if ($output) {
+                return $output;
+            }
+        }
+
+        // Fallback: try to extract text from raw PDF
+        $content = file_get_contents($path);
+        // Remove binary data and extract text between streams
+        $text = preg_replace('/[^\x20-\x7E\s]/', '', $content);
+        // Clean up common PDF artifacts
+        $text = preg_replace('/\s+/', ' ', $text);
+        return trim($text);
+    }
+
+    /**
+     * Extract text from Word document (basic).
+     */
+    private function extractTextFromDoc(string $path): string
+    {
+        // For docx, try to extract from word/document.xml
+        if (str_ends_with($path, '.docx')) {
+            $zip = new \ZipArchive();
+            if ($zip->open($path) === true) {
+                $xml = $zip->getFromName('word/document.xml');
+                $zip->close();
+                if ($xml) {
+                    // Strip XML tags to get text
+                    return strip_tags(str_replace(['<w:p>', '<w:br/>'], ["\n\n", "\n"], $xml));
+                }
+            }
+        }
+
+        // Fallback for .doc files - read as text and clean
+        $content = file_get_contents($path);
+        return preg_replace('/[^\x20-\x7E\s]/', ' ', $content);
     }
 
     /**
