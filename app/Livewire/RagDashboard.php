@@ -112,7 +112,7 @@ class RagDashboard extends Component
     /**
      * Get daily query volume.
      */
-    private function getDailyVolume(Carbon $startDate, Carbon $endDate): array
+    private function getDailyVolume(CarbonInterface $startDate, CarbonInterface $endDate): array
     {
         return RagMetrics::inDateRange($startDate, $endDate)
             ->selectRaw('DATE(created_at) as date, COUNT(*) as count')
@@ -129,7 +129,7 @@ class RagDashboard extends Component
     /**
      * Get confidence score trend.
      */
-    private function getConfidenceTrend(Carbon $startDate, Carbon $endDate): array
+    private function getConfidenceTrend(CarbonInterface $startDate, CarbonInterface $endDate): array
     {
         return RagMetrics::inDateRange($startDate, $endDate)
             ->selectRaw('DATE(created_at) as date, AVG(confidence_score) as avg_confidence')
@@ -146,7 +146,7 @@ class RagDashboard extends Component
     /**
      * Get latency trend.
      */
-    private function getLatencyTrend(Carbon $startDate, Carbon $endDate): array
+    private function getLatencyTrend(CarbonInterface $startDate, CarbonInterface $endDate): array
     {
         return RagMetrics::inDateRange($startDate, $endDate)
             ->selectRaw('
@@ -170,7 +170,7 @@ class RagDashboard extends Component
     /**
      * Get satisfaction data.
      */
-    private function getSatisfactionData(Carbon $startDate, Carbon $endDate): array
+    private function getSatisfactionData(CarbonInterface $startDate, CarbonInterface $endDate): array
     {
         $feedback = UserFeedback::inDateRange($startDate, $endDate);
         
@@ -189,7 +189,7 @@ class RagDashboard extends Component
     /**
      * Get token usage statistics.
      */
-    private function getTokenUsage(Carbon $startDate, Carbon $endDate): array
+    private function getTokenUsage(CarbonInterface $startDate, CarbonInterface $endDate): array
     {
         $metrics = RagMetrics::inDateRange($startDate, $endDate);
 
@@ -204,7 +204,7 @@ class RagDashboard extends Component
     /**
      * Get top failing queries.
      */
-    private function getFailingQueries(Carbon $startDate, Carbon $endDate): array
+    private function getFailingQueries(CarbonInterface $startDate, CarbonInterface $endDate): array
     {
         return RagMetrics::inDateRange($startDate, $endDate)
             ->where(function ($query) {
@@ -246,7 +246,7 @@ class RagDashboard extends Component
     /**
      * Get validation statistics.
      */
-    private function getValidationStats(Carbon $startDate, Carbon $endDate): array
+    private function getValidationStats(CarbonInterface $startDate, CarbonInterface $endDate): array
     {
         $metrics = RagMetrics::inDateRange($startDate, $endDate)
             ->whereNotNull('validation_results')
