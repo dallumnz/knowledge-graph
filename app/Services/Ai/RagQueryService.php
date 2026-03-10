@@ -2,6 +2,7 @@
 
 namespace App\Services\Ai;
 
+use App\Services\Ai\Evaluation\MetricsService;
 use App\Services\Ai\Validation\ValidationPipeline;
 use Illuminate\Support\Facades\Log;
 
@@ -36,6 +37,11 @@ class RagQueryService
     private ValidationPipeline $validator;
 
     /**
+     * Metrics service for tracking query performance.
+     */
+    private MetricsService $metricsService;
+
+    /**
      * LLM provider for response generation.
      */
     private $llmProvider;
@@ -67,10 +73,12 @@ class RagQueryService
         ?HybridSearchService $hybridSearch = null,
         ?ReRankingService $reRanker = null,
         ?ValidationPipeline $validator = null,
+        ?MetricsService $metricsService = null,
     ) {
         $this->hybridSearch = $hybridSearch ?? new HybridSearchService();
         $this->reRanker = $reRanker ?? new ReRankingService();
         $this->validator = $validator ?? new ValidationPipeline();
+        $this->metricsService = $metricsService ?? new MetricsService();
 
         // Load configuration
         $this->defaultContextChunks = config('ai.rag.context_chunks', 5);
@@ -89,11 +97,15 @@ class RagQueryService
      *   - context_chunks: int - Number of chunks to retrieve
      *   - rerank: bool - Enable re-ranking
      *   - alpha: float - Vector/keyword balance (0.0-1.0)
+     *   - track_metrics: bool (default: true) - Record metrics for this query
+     *   - user_id: int|null - User ID for metrics tracking
      * @return array<string, mixed> Query result with response and metadata
      */
     public function query(string $query, array $options = []): array
     {
         $startTime = microtime(true);
+        $queryId = $this->metricsService->generateQueryId();
+        $trackMetrics = $options['track_metrics'] ?? true;
 
         try {
             // Step 1: Retrieve context via hybrid search
@@ -147,7 +159,7 @@ class RagQueryService
 
             $totalTime = microtime(true) - $startTime;
 
-            return $this->buildResult(
+            $result = $this->buildResult(
                 query: $query,
                 response: $response,
                 context: $searchResults,
@@ -159,7 +171,15 @@ class RagQueryService
                     'total_ms' => round($totalTime * 1000),
                 ],
                 error: null,
+                queryId: $queryId,
             );
+
+            // Record metrics if enabled
+            if ($trackMetrics) {
+                $this->recordMetrics($result, $queryId, $options['user_id'] ?? null);
+            }
+
+            return $result;
         } catch (\Exception $e) {
             Log::error('RAG query failed', [
                 'query' => $query,
@@ -348,6 +368,7 @@ PROMPT;
      * @param array<string, mixed>|null $validation Validation results
      * @param array<string, float> $timing Timing information
      * @param string|null $error Error message if any
+     * @param string|null $queryId Unique query identifier
      * @return array<string, mixed>
      */
     private function buildResult(
@@ -357,11 +378,13 @@ PROMPT;
         ?array $validation,
         array $timing,
         ?string $error,
+        ?string $queryId = null,
     ): array {
         $confidenceScore = $validation['confidence_score'] ?? 0.5;
 
         return [
             'success' => $error === null,
+            'query_id' => $queryId,
             'query' => $query,
             'response' => $response,
             'confidence_score' => $confidenceScore,
@@ -381,6 +404,51 @@ PROMPT;
             'timing' => $timing,
             'error' => $error,
         ];
+    }
+
+    /**
+     * Record metrics for a RAG query.
+     *
+     * @param array $result The query result
+     * @param string $queryId Unique query identifier
+     * @param int|null $userId User ID if available
+     */
+    private function recordMetrics(array $result, string $queryId, ?int $userId = null): void
+    {
+        try {
+            $metrics = [
+                'query_id' => $queryId,
+                'query' => $result['query'],
+                'user_id' => $userId,
+                'confidence_score' => $result['confidence_score'],
+                'latency_ms' => $result['timing']['total_ms'] ?? 0,
+                'tokens_input' => $this->estimateTokens($result['sources'], $result['query']),
+                'tokens_output' => (int) ceil(strlen($result['response']) / 4),
+                'validation_results' => $result['validation'] ?? [],
+                'chunks_retrieved' => count($result['sources']),
+                'search_method' => 'hybrid',
+                'validation_passed' => $result['validation']['pass'] ?? null,
+            ];
+
+            $this->metricsService->record($metrics);
+        } catch (\Exception $e) {
+            Log::warning('Failed to record RAG metrics', [
+                'query_id' => $queryId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Estimate input tokens from context and query.
+     */
+    private function estimateTokens(array $sources, string $query): int
+    {
+        $text = $query;
+        foreach ($sources as $source) {
+            $text .= $source['content'] ?? '';
+        }
+        return (int) ceil(strlen($text) / 4);
     }
 
     /**

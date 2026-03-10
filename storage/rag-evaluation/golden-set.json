@@ -1,0 +1,37 @@
+[
+    {
+        "id": "gs_001",
+        "query": "What is the main purpose of this knowledge graph system?",
+        "expected_answer_contains": ["knowledge", "graph", "document", "search"],
+        "category": "general",
+        "difficulty": "easy"
+    },
+    {
+        "id": "gs_002",
+        "query": "How does the hybrid search work?",
+        "expected_answer_contains": ["vector", "keyword", "semantic", "search"],
+        "category": "technical",
+        "difficulty": "medium"
+    },
+    {
+        "id": "gs_003",
+        "query": "What are the validation nodes in the RAG pipeline?",
+        "expected_answer_contains": ["gatekeeper", "auditor", "strategist", "validation"],
+        "category": "technical",
+        "difficulty": "medium"
+    },
+    {
+        "id": "gs_004",
+        "query": "How can I ingest a new document?",
+        "expected_answer_contains": ["ingest", "document", "upload", "API"],
+        "category": "usage",
+        "difficulty": "easy"
+    },
+    {
+        "id": "gs_005",
+        "query": "What is the difference between vector search and keyword search?",
+        "expected_answer_contains": ["vector", "semantic", "keyword", "exact"],
+        "category": "technical",
+        "difficulty": "medium"
+    }
+]

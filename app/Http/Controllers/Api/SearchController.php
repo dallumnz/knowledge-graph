@@ -409,6 +409,7 @@ class SearchController extends Controller
             'context_chunks' => $request->input('context_chunks'),
             'rerank' => $request->boolean('rerank', true),
             'alpha' => $request->input('alpha'),
+            'user_id' => $request->user()->id,
         ];
 
         // Add specific nodes if provided
@@ -431,6 +432,7 @@ class SearchController extends Controller
         return response()->json([
             'success' => true,
             'data' => [
+                'query_id' => $result['query_id'],
                 'query' => $result['query'],
                 'response' => $result['response'],
                 'confidence_score' => $result['confidence_score'],

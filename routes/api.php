@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\DocumentController;
+use App\Http\Controllers\Api\FeedbackController;
 use App\Http\Controllers\Api\IngestController;
 use App\Http\Controllers\Api\SearchController;
 use Illuminate\Support\Facades\Route;
@@ -35,6 +36,10 @@ Route::middleware(['auth:sanctum', 'throttle:60,1', 'cache.api'])->group(functio
 
     // RAG query endpoint with validation
     Route::post('/rag/query', [SearchController::class, 'ragQuery'])->name('api.rag.query');
+
+    // User feedback endpoint
+    Route::post('/feedback', [FeedbackController::class, 'store'])->name('api.feedback.store');
+    Route::get('/feedback/{queryId}', [FeedbackController::class, 'show'])->name('api.feedback.show');
 
     // Node endpoints
     Route::get('/nodes/{id}', [SearchController::class, 'show'])->name('api.nodes.show');

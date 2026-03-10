@@ -19,6 +19,11 @@ Route::middleware(['auth'])->group(function () {
     // Quick ingest form submission (non-JavaScript fallback)
     Route::post('/dashboard/ingest', [IngestController::class, 'quickIngest'])
         ->name('dashboard.ingest');
+
+    // RAG Quality Dashboard (admin only)
+    Route::get('/admin/rag-dashboard', \App\Livewire\RagDashboard::class)
+        ->name('admin.rag-dashboard')
+        ->middleware('can:admin');
 });
 
 require __DIR__.'/settings.php';
